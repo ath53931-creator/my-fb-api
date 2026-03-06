@@ -6,28 +6,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// التوكن الجديد الخاص بك (مدمج وجاهز)
+// التوكن الخاص بك
 const FB_TOKEN = 'EAAXkQYSWLfQBQ4UnT8J87oF6BxgeZC55iq8STRSpGNqWRCGRxfpkebrW3yC5UL2lNIp5zfLChG6zp94r9p6CZCHVeI6E4764vmLj1UDWPQZAwS7BZBL8ZA9imOj0A1UJXk0yTPW84GwAESpKMcDoNfqGaZApm19giC10R7Dh2YqHo6VaUgzQidbaHG2nFuAZCXI7F6GYBLe19jmzQix5nS7kYxzUBcauFQZBoxj1Ky1FsmZA7BZA7PhXDpsZAsgyObdhaJicl6zEEFVeYPJN7ZADp9qRFvxPiUlYq5rMI3OC4DAv3QBZCsZAHXhXXqZBtZBJkHwtXUi6HkB8SIj74ATbckkZD';
 
-// وظيفة احترافية لاستخراج معرف المنشور بدقة
 function extractPostId(url) {
     try {
-        if (!url.includes('facebook.com')) return url.trim(); // إذا كان المدخل رقماً فقط
-        
-        const urlObj = new URL(url);
-        const params = new URLSearchParams(urlObj.search);
-        
-        // البحث عن المعرف في روابط الصور أو الفيديوهات أو المنشورات المباشرة
-        let id = params.get('fbid') || params.get('story_fbid') || params.get('id');
-        if (id) return id;
-
-        const segments = urlObj.pathname.split('/').filter(s => s.length > 0);
-        // استخراج أطول سلسلة أرقام في المسار
-        const numericSegments = segments.filter(s => /^\d+$/.test(s));
-        return numericSegments.length > 0 ? numericSegments[numericSegments.length - 1] : segments[segments.length - 1];
-    } catch (e) {
-        return null;
-    }
+        if (!url.includes('facebook.com')) return url.trim();
+        const regex = /(?:\/posts\/|(?:\?|&)fbid=|(?:\?|&)story_fbid=|(?:\?|&)id=|\/photos\/|\/videos\/|\/v\/)([0-9]+)/;
+        const match = url.match(regex);
+        return match ? match[1] : null;
+    } catch (e) { return null; }
 }
 
 app.post('/get-comments', async (req, res) => {
@@ -35,36 +23,43 @@ app.post('/get-comments', async (req, res) => {
     const postId = extractPostId(postUrl);
 
     if (!postId) {
-        return res.status(400).json({ success: false, error: 'تعذر استخراج معرف المنشور' });
+        return res.status(400).json({ success: false, error: 'تعذر تحديد رقم المنشور' });
     }
 
     try {
-        // استخدام Graph API لجلب التعليقات (v21.0 هي الأحدث والأكثر استقراراً)
-        const fbApiUrl = `https://graph.facebook.com/v21.0/${postId}/comments?access_token=${FB_TOKEN}&limit=2000&fields=from,message`;
+        // التعديل هنا: نطلب الحقول بطريقة لا تسبب خطأ (12)
+        // إذا لم يسمح فيسبوك بالاسم (from)، سيسحب النص (message) كبديل للقرعة
+        const fbApiUrl = `https://graph.facebook.com/v21.0/${postId}/comments?access_token=${FB_TOKEN}&limit=1000&fields=id,message,from`;
         
         const response = await axios.get(fbApiUrl);
         const comments = response.data.data;
 
         if (!comments || comments.length === 0) {
-            return res.json({ success: true, participants: [], message: 'لا توجد تعليقات عامة متاحة.' });
+            return res.json({ success: true, participants: [], message: 'لا توجد تعليقات عامة.' });
         }
 
-        // تصفية الأسماء المكررة
-        const names = comments.map(c => c.from ? c.from.name : 'مشارك فيسبوك');
-        const uniqueNames = [...new Set(names)];
+        // منطق ذكي: إذا كان الاسم متاحاً نأخذه، وإذا كان مخفياً نأخذ نص التعليق لتمييز الشخص
+        const participants = comments.map(c => {
+            if (c.from && c.from.name) {
+                return c.from.name;
+            } else {
+                // إذا كان الاسم مخفياً بسبب الخصوصية، نستخدم أول 20 حرف من تعليقه كمعرف له في القرعة
+                return "تعليق: " + (c.message ? c.message.substring(0, 20) : "مشارك مخفي");
+            }
+        });
+
+        const uniqueParticipants = [...new Set(participants)];
 
         res.json({
             success: true,
-            total: uniqueNames.length,
-            participants: uniqueNames
+            total: uniqueParticipants.length,
+            participants: uniqueParticipants
         });
 
     } catch (error) {
         const errorDetail = error.response ? error.response.data.error.message : error.message;
-        console.error("FB Error:", errorDetail);
-        res.status(500).json({ success: false, error: errorDetail });
+        res.status(500).json({ success: false, error: "خطأ فيسبوك: " + errorDetail });
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
+app.listen(process.env.PORT || 3000);
