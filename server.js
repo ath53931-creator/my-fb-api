@@ -6,9 +6,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// التوكن الخاص بك
-const FB_TOKEN = 'EAAXkQYSWLfQBQ4UnT8J87oF6BxgeZC55iq8STRSpGNqWRCGRxfpkebrW3yC5UL2lNIp5zfLChG6zp94r9p6CZCHVeI6E4764vmLj1UDWPQZAwS7BZBL8ZA9imOj0A1UJXk0yTPW84GwAESpKMcDoNfqGaZApm19giC10R7Dh2YqHo6VaUgzQidbaHG2nFuAZCXI7F6GYBLe19jmzQix5nS7kYxzUBcauFQZBoxj1Ky1FsmZA7BZA7PhXDpsZAsgyObdhaJicl6zEEFVeYPJN7ZADp9qRFvxPiUlYq5rMI3OC4DAv3QBZCsZAHXhXXqZBtZBJkHwtXUi6HkB8SIj74ATbckkZD';
+// التوكن الجديد الخاص بصفحتك
+const PAGE_TOKEN = 'EAAL9mRSuO2UBQ5kNra0n7cZAFz4kvY4NOZASRqS2Jx9MIsm6deYLDjUmZCwTfZBMVyqN34mRINIlLXB5rgfA03lWtOw2W45fH20ZAOSTK7MARCElWTqYYZBpj7UESsQZBvBsHSJWEJzRsgnzCJMrc5FhsQQ56v58TJYmmkyAZC3dqxaHToTc7fOruG3ZBMc5iyjKSdN0FnGJt';
 
+// وظيفة لاستخراج المعرف الرقمي للمنشور
 function extractPostId(url) {
     try {
         if (!url.includes('facebook.com')) return url.trim();
@@ -23,31 +24,31 @@ app.post('/get-comments', async (req, res) => {
     const postId = extractPostId(postUrl);
 
     if (!postId) {
-        return res.status(400).json({ success: false, error: 'تعذر تحديد رقم المنشور' });
+        return res.status(400).json({ success: false, error: 'لم نتمكن من تحديد رقم المنشور' });
     }
 
     try {
-        // التعديل هنا: نطلب الحقول بطريقة لا تسبب خطأ (12)
-        // إذا لم يسمح فيسبوك بالاسم (from)، سيسحب النص (message) كبديل للقرعة
-        const fbApiUrl = `https://graph.facebook.com/v21.0/${postId}/comments?access_token=${FB_TOKEN}&limit=1000&fields=id,message,from`;
+        // نطلب حقل الـ from للحصول على الأسماء وحقل message كاحتياط
+        const fbApiUrl = `https://graph.facebook.com/v21.0/${postId}/comments?access_token=${PAGE_TOKEN}&limit=5000&fields=from,message`;
         
         const response = await axios.get(fbApiUrl);
         const comments = response.data.data;
 
         if (!comments || comments.length === 0) {
-            return res.json({ success: true, participants: [], message: 'لا توجد تعليقات عامة.' });
+            return res.json({ success: true, participants: [], message: 'لا توجد تعليقات حتى الآن.' });
         }
 
-        // منطق ذكي: إذا كان الاسم متاحاً نأخذه، وإذا كان مخفياً نأخذ نص التعليق لتمييز الشخص
+        // استخراج الأسماء (بما أنك مدير الصفحة، سيظهر الاسم الصريح)
         const participants = comments.map(c => {
             if (c.from && c.from.name) {
                 return c.from.name;
-            } else {
-                // إذا كان الاسم مخفياً بسبب الخصوصية، نستخدم أول 20 حرف من تعليقه كمعرف له في القرعة
-                return "تعليق: " + (c.message ? c.message.substring(0, 20) : "مشارك مخفي");
+            } else if (c.message) {
+                return "مشارك (نص تعليقه: " + c.message.substring(0, 15) + "...)";
             }
+            return "مشارك مخفي الهوية";
         });
 
+        // حذف التكرار (كل شخص يدخل القرعة مرة واحدة مهما كرر التعليق)
         const uniqueParticipants = [...new Set(participants)];
 
         res.json({
@@ -58,8 +59,10 @@ app.post('/get-comments', async (req, res) => {
 
     } catch (error) {
         const errorDetail = error.response ? error.response.data.error.message : error.message;
-        res.status(500).json({ success: false, error: "خطأ فيسبوك: " + errorDetail });
+        console.error("Facebook API Error:", errorDetail);
+        res.status(500).json({ success: false, error: "خطأ من فيسبوك: " + errorDetail });
     }
 });
 
-app.listen(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
