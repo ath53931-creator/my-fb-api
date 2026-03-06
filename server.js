@@ -6,26 +6,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// التوكن الخاص بك (دائم ومفعل)
-const FB_TOKEN = 'EAAL9mRSuO2UBQZCgAObR1atU49x280heRhajW7P4BhSyJDtCGwIK6qPopHqsjjG2Wclt0XcNxvAWhvTf8lZBMKFXq1CxplFgeVvwUbZCKKZA7S8i1VHUOsXaxiLgR0Hwe4iZAh5epJYBBJWBAFcT5DG1KgtqNjryc1lNJha4nSiW7vQ3zfhA91sZBpBe0ETmH8fNeIZCvJAqVJYCejZABihyGoWnI43zj0whqmsUC5k3RZBx2rtHbZCIvGfQZDZD';
+// التوكن الجديد الخاص بك (مدمج وجاهز)
+const FB_TOKEN = 'EAAXkQYSWLfQBQ4UnT8J87oF6BxgeZC55iq8STRSpGNqWRCGRxfpkebrW3yC5UL2lNIp5zfLChG6zp94r9p6CZCHVeI6E4764vmLj1UDWPQZAwS7BZBL8ZA9imOj0A1UJXk0yTPW84GwAESpKMcDoNfqGaZApm19giC10R7Dh2YqHo6VaUgzQidbaHG2nFuAZCXI7F6GYBLe19jmzQix5nS7kYxzUBcauFQZBoxj1Ky1FsmZA7BZA7PhXDpsZAsgyObdhaJicl6zEEFVeYPJN7ZADp9qRFvxPiUlYq5rMI3OC4DAv3QBZCsZAHXhXXqZBtZBJkHwtXUi6HkB8SIj74ATbckkZD';
 
-// وظيفة ذكية لاستخراج ID المنشور من الرابط
+// وظيفة احترافية لاستخراج معرف المنشور بدقة
 function extractPostId(url) {
     try {
+        if (!url.includes('facebook.com')) return url.trim(); // إذا كان المدخل رقماً فقط
+        
         const urlObj = new URL(url);
-        // 1. البحث في المعلمات (Parameters) مثل fbid أو story_fbid
         const params = new URLSearchParams(urlObj.search);
+        
+        // البحث عن المعرف في روابط الصور أو الفيديوهات أو المنشورات المباشرة
         let id = params.get('fbid') || params.get('story_fbid') || params.get('id');
         if (id) return id;
 
-        // 2. البحث في مسار الرابط (Pathname) عن أرقام طويلة
         const segments = urlObj.pathname.split('/').filter(s => s.length > 0);
-        // نبحث عن أول عنصر يتكون من أرقام فقط وطوله أكثر من 5 خانات
-        const numericId = segments.find(s => /^\d+$/.test(s) && s.length > 5);
-        if (numericId) return numericId;
-
-        // 3. إذا كان الرابط ينتهي برقم مباشرة
-        return segments[segments.length - 1];
+        // استخراج أطول سلسلة أرقام في المسار
+        const numericSegments = segments.filter(s => /^\d+$/.test(s));
+        return numericSegments.length > 0 ? numericSegments[numericSegments.length - 1] : segments[segments.length - 1];
     } catch (e) {
         return null;
     }
@@ -33,30 +32,25 @@ function extractPostId(url) {
 
 app.post('/get-comments', async (req, res) => {
     const { postUrl } = req.body;
-
-    if (!postUrl) {
-        return res.status(400).json({ success: false, error: 'يرجى إدخال رابط المنشور' });
-    }
-
     const postId = extractPostId(postUrl);
 
     if (!postId) {
-        return res.status(400).json({ success: false, error: 'لم نتمكن من العثور على ID المنشور. تأكد من صحة الرابط.' });
+        return res.status(400).json({ success: false, error: 'تعذر استخراج معرف المنشور' });
     }
 
     try {
-        // الاتصال المباشر بـ Facebook Graph API
-        const fbApiUrl = `https://graph.facebook.com/v18.0/${postId}/comments?access_token=${FB_TOKEN}&limit=1000&fields=from,message`;
+        // استخدام Graph API لجلب التعليقات (v21.0 هي الأحدث والأكثر استقراراً)
+        const fbApiUrl = `https://graph.facebook.com/v21.0/${postId}/comments?access_token=${FB_TOKEN}&limit=2000&fields=from,message`;
         
         const response = await axios.get(fbApiUrl);
         const comments = response.data.data;
 
         if (!comments || comments.length === 0) {
-            return res.json({ success: true, participants: [], message: 'لا توجد تعليقات على هذا المنشور.' });
+            return res.json({ success: true, participants: [], message: 'لا توجد تعليقات عامة متاحة.' });
         }
 
-        // استخراج الأسماء وحذف التكرار
-        const names = comments.map(c => c.from ? c.from.name : 'مستخدم فيسبوك');
+        // تصفية الأسماء المكررة
+        const names = comments.map(c => c.from ? c.from.name : 'مشارك فيسبوك');
         const uniqueNames = [...new Set(names)];
 
         res.json({
@@ -66,11 +60,11 @@ app.post('/get-comments', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("FB Error:", error.response ? error.response.data : error.message);
-        const errorMsg = error.response && error.response.data.error ? error.response.data.error.message : error.message;
-        res.status(500).json({ success: false, error: errorMsg });
+        const errorDetail = error.response ? error.response.data.error.message : error.message;
+        console.error("FB Error:", errorDetail);
+        res.status(500).json({ success: false, error: errorDetail });
     }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
